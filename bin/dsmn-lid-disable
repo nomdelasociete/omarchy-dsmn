@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Remove the dsmn logind drop-in. Run from a real terminal. This asks for sudo.
+set -euo pipefail
+
+dropin=/etc/systemd/logind.conf.d/nomdelasociete-dsmn-lid.conf
+if [[ ! -f "$dropin" ]]; then
+  echo "dsmn had not changed the lid setting."
+  exit 0
+fi
+sudo rm -f "$dropin"
+sudo systemctl reload systemd-logind
+echo "Lid close follows logind's default again. You can close this terminal."

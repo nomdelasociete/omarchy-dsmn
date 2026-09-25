@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "nomdelasociete.dsmn",
+  "name": "dsmn",
+  "version": "0.1.0",
+  "author": "Nom de la Société",
+  "license": "MIT",
+  "description": "Don't stop me now. Keeps this Omarchy machine awake while a lease is running, and lets it sleep when the work stops.",
+  "kinds": ["service", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "dsmn",
+    "description": "A countdown for the lease that keeps the machine awake.",
+    "category": "System",
+    "aliases": ["dsmn", "awake", "sleep", "caffeine"],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

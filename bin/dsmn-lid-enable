@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# One-time logind setting so a lid close honors dsmn's inhibitor.
+# Run from a real terminal. This asks for sudo.
+set -euo pipefail
+
+dropin=/etc/systemd/logind.conf.d/nomdelasociete-dsmn-lid.conf
+echo "dsmn will let a closed lid obey the sleep lease."
+echo "This writes $dropin and reloads logind. Sleep still works when the lease ends."
+sudo mkdir -p /etc/systemd/logind.conf.d
+sudo tee "$dropin" >/dev/null <<'EOF'
+# Written by dsmn. Lid close honors sleep inhibitors, so a dsmn lease
+# can keep a closed laptop awake. Remove this file to restore logind's default.
+[Login]
+LidSwitchIgnoreInhibited=no
+EOF
+sudo systemctl reload systemd-logind
+echo "Lid close now honors dsmn. You can close this terminal."
