@@ -52,11 +52,36 @@ def _hook_group(agent: str, event: str) -> dict:
 
 
 def _is_ours(command: str, agent: str | None = None) -> bool:
-    if "dsmn-agent-hook.sh" not in command and "claude-hook.sh" not in command:
+    """True only for dsmn's own hook command, not a shared substring."""
+    if "dsmn-agent-hook.sh" not in command:
         return False
     if agent is None:
         return True
     return f"DSMN_HOOK_AGENT={shell_quote(agent)}" in command or f"DSMN_HOOK_AGENT='{agent}'" in command
+
+
+def _write_private(path: Path, payload: str) -> None:
+    """Replace path without widening its permissions. New files stay private."""
+    if path.is_symlink():
+        raise RuntimeError(f"{path} is a symlink; existing configuration was not written")
+    path.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
+    try:
+        mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        mode = 0o600
+    temporary = path.with_suffix(path.suffix + ".dsmn-tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def _read_json(path: Path) -> dict:
@@ -77,13 +102,8 @@ def _read_json(path: Path) -> dict:
 
 
 def _write_json(path: Path, value: dict) -> None:
-    if path.is_symlink():
-        raise RuntimeError(f"{path} is a symlink; existing configuration was not written")
-    path.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
     payload = json.dumps(value, indent=2, sort_keys=True) + "\n"
-    temporary = path.with_suffix(path.suffix + ".dsmn-tmp")
-    temporary.write_text(payload, encoding="utf-8")
-    os.replace(temporary, path)
+    _write_private(path, payload)
 
 
 def _merge_standard(root: dict, agent: str) -> bool:
@@ -104,17 +124,12 @@ def _merge_standard(root: dict, agent: str) -> bool:
                 kept.append(group)
                 continue
             nested = group.get("hooks")
-            if isinstance(nested, list) and len(nested) == 1 and isinstance(nested[0], dict):
-                command = str(nested[0].get("command") or "")
-                if "caffeinate" in command and "matcher" not in group:
-                    changed = True
-                    continue
             if isinstance(nested, list):
                 filtered = []
                 removed = False
                 for item in nested:
                     command = str(item.get("command") or "") if isinstance(item, dict) else ""
-                    if _is_ours(command, agent) or "claude-hook.sh" in command:
+                    if _is_ours(command, agent):
                         removed = True
                         continue
                     filtered.append(item)
@@ -150,7 +165,7 @@ def _strip_standard(root: dict, agent: str) -> bool:
             filtered = []
             for item in group["hooks"]:
                 command = str(item.get("command") or "") if isinstance(item, dict) else ""
-                if _is_ours(command, agent) or "claude-hook.sh" in command:
+                if _is_ours(command, agent):
                     changed = True
                     continue
                 filtered.append(item)
@@ -280,12 +295,7 @@ def enable_codex_hooks(text: str) -> tuple[str, str]:
 
 
 def _write_text(path: Path, text: str) -> None:
-    if path.is_symlink():
-        raise RuntimeError(f"{path} is a symlink; existing configuration was not written")
-    path.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".dsmn-tmp")
-    temporary.write_text(text, encoding="utf-8")
-    os.replace(temporary, path)
+    _write_private(path, text)
 
 
 def _agent_present(target: str) -> bool:

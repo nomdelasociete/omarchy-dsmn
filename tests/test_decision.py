@@ -1,5 +1,6 @@
 import json
 import os
+import signal
 import sys
 import tempfile
 import unittest
@@ -200,6 +201,90 @@ class HookTests(unittest.TestCase):
             report = hooks.install_one("claude", force=True)
             self.assertFalse(report["ok"])
             self.assertEqual(target.read_text(), "{}")
+
+    def test_install_keeps_private_mode_and_foreign_hooks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            os.environ["DSMN_HOME"] = directory
+            claude = Path(directory) / ".claude"
+            claude.mkdir()
+            settings = claude / "settings.json"
+            settings.write_text(json.dumps({
+                "hooks": {
+                    "PreToolUse": [
+                        {"hooks": [{"type": "command", "command": "caffeinate -i sleep 10"}]},
+                        {"hooks": [{"type": "command", "command": "/opt/other/claude-hook.sh"}]},
+                    ]
+                }
+            }))
+            os.chmod(settings, 0o600)
+            report = hooks.install_one("claude", force=True)
+            self.assertTrue(report["ok"], report)
+            text = settings.read_text()
+            self.assertIn("caffeinate -i sleep 10", text)
+            self.assertIn("/opt/other/claude-hook.sh", text)
+            self.assertIn("dsmn-agent-hook.sh", text)
+            self.assertEqual(settings.stat().st_mode & 0o777, 0o600)
+            self.assertFalse(list(claude.glob("*.dsmn-tmp")))
+            removed = hooks.uninstall_one("claude")
+            self.assertEqual(removed["message"], "removed")
+            after = settings.read_text()
+            self.assertIn("caffeinate -i sleep 10", after)
+            self.assertIn("/opt/other/claude-hook.sh", after)
+            self.assertNotIn("dsmn-agent-hook.sh", after)
+            self.assertEqual(settings.stat().st_mode & 0o777, 0o600)
+
+
+class HoldIdentityTests(unittest.TestCase):
+    def tearDown(self):
+        os.environ.pop("DSMN_STATE_DIR", None)
+
+    def test_start_ticks_use_the_last_closing_paren(self):
+        stat = "42 (weird) name) R 1 1 1 0 -1 4194304 0 0 0 0 0 0 0 0 20 0 1 0 424242 100 0\n"
+        self.assertEqual(dsmn_core.process_start_ticks(stat), 424242)
+        self.assertIsNone(dsmn_core.process_start_ticks("no paren here"))
+
+    def test_hold_command_is_dsmn_hold_only(self):
+        self.assertTrue(dsmn_core.hold_command(["/usr/bin/python3", "/opt/bin/dsmn", "hold"]))
+        self.assertTrue(dsmn_core.hold_command(["/opt/bin/dsmn", "hold"]))
+        self.assertFalse(dsmn_core.hold_command(["/usr/bin/python3", "/opt/bin/dsmn", "status"]))
+        self.assertFalse(dsmn_core.hold_command(["/usr/bin/sleep", "hold"]))
+        self.assertFalse(dsmn_core.hold_command(["/opt/bin/dsmn-agent-hook.sh", "hold"]))
+
+    def test_release_hold_requires_start_time_and_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            os.environ["DSMN_STATE_DIR"] = directory
+            pid_file = dsmn_core.pid_path()
+            original_kill = dsmn_core.os.kill
+            original_start = dsmn_core.read_process_start_ticks
+            original_argv = dsmn_core.read_cmdline
+            sent = []
+
+            def record(pid, sig):
+                sent.append((pid, sig))
+
+            dsmn_core.os.kill = record
+            dsmn_core.read_process_start_ticks = lambda pid: 99 if pid == 4321 else None
+            dsmn_core.read_cmdline = lambda pid: ["/usr/bin/python3", "/opt/bin/dsmn", "hold"] if pid == 4321 else None
+            try:
+                pid_file.write_text("4321 100\n")
+                self.assertIsNone(dsmn_core.hold_pid())
+                dsmn_core.release_hold()
+                pid_file.write_text("4321\n")
+                self.assertIsNone(dsmn_core.hold_pid())
+                dsmn_core.release_hold()
+                dsmn_core.read_cmdline = lambda pid: ["/usr/bin/sleep", "hold"]
+                pid_file.write_text("4321 99\n")
+                self.assertIsNone(dsmn_core.hold_pid())
+                dsmn_core.release_hold()
+                self.assertEqual(sent, [])
+                dsmn_core.read_cmdline = lambda pid: ["/usr/bin/python3", "/opt/bin/dsmn", "hold"]
+                self.assertEqual(dsmn_core.hold_pid(), 4321)
+                dsmn_core.release_hold()
+                self.assertEqual(sent, [(4321, signal.SIGTERM)])
+            finally:
+                dsmn_core.os.kill = original_kill
+                dsmn_core.read_process_start_ticks = original_start
+                dsmn_core.read_cmdline = original_argv
 
 
 if __name__ == "__main__":

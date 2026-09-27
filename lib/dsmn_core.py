@@ -398,22 +398,68 @@ def dsmn_inhibitors(inhibitors: list[dict] | None = None) -> list[dict]:
     return [row for row in rows if row.get("who") == "dsmn"]
 
 
-def _pid_alive(pid: int) -> bool:
-    if pid <= 0:
-        return False
+def process_start_ticks(stat_text: str) -> int | None:
+    """starttime from /proc/pid/stat. comm may contain spaces and parentheses."""
+    end = stat_text.rfind(")")
+    if end < 0:
+        return None
+    fields = stat_text[end + 2 :].split()
     try:
-        os.kill(pid, 0)
+        return int(fields[19])
+    except (IndexError, ValueError):
+        return None
+
+
+def read_process_start_ticks(pid: int) -> int | None:
+    try:
+        text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
     except OSError:
+        return None
+    return process_start_ticks(text)
+
+
+def hold_command(argv: list[str]) -> bool:
+    """The saved holder is the `dsmn hold` process, not whichever pid was reused."""
+    if len(argv) < 2 or argv[-1] != "hold":
         return False
-    return True
+    return any(Path(part).name == "dsmn" for part in argv[:-1])
+
+
+def read_cmdline(pid: int) -> list[str] | None:
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return None
+    return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
+
+
+def _hold_record() -> tuple[int, int] | None:
+    try:
+        parts = pid_path().read_text(encoding="utf-8").split()
+    except OSError:
+        return None
+    if len(parts) != 2:
+        return None
+    try:
+        pid, started = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    if pid <= 0:
+        return None
+    return pid, started
 
 
 def hold_pid() -> int | None:
-    try:
-        pid = int(pid_path().read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
+    record = _hold_record()
+    if record is None:
         return None
-    return pid if _pid_alive(pid) else None
+    pid, started = record
+    if read_process_start_ticks(pid) != started:
+        return None
+    argv = read_cmdline(pid)
+    if argv is None or not hold_command(argv):
+        return None
+    return pid
 
 
 def inhibitor_held() -> bool:
@@ -686,7 +732,13 @@ def hold_main() -> int:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         return 0
-    pid_path().write_text(f"{os.getpid()}\n", encoding="utf-8")
+    started = read_process_start_ticks(os.getpid())
+    if started is None:
+        return 1
+    record = f"{os.getpid()} {started}"
+    path = pid_path()
+    path.write_text(record + "\n", encoding="utf-8")
+    os.chmod(path, 0o600)
     try:
         while True:
             bundle = tick()
@@ -695,8 +747,8 @@ def hold_main() -> int:
             time.sleep(HOLD_POLL_SECONDS)
     finally:
         try:
-            if pid_path().read_text(encoding="utf-8").strip() == str(os.getpid()):
-                pid_path().unlink()
+            if path.read_text(encoding="utf-8").strip() == record:
+                path.unlink()
         except OSError:
             pass
 
