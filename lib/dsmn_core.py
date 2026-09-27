@@ -502,14 +502,8 @@ def release_hold() -> None:
 
 
 def kill_dsmn_inhibitors() -> None:
+    """Signal only the verified holder. A logind who of dsmn is just a label."""
     release_hold()
-    for row in dsmn_inhibitors():
-        pid = int(row.get("pid") or 0)
-        if pid > 0 and pid != os.getpid():
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except OSError:
-                continue
 
 
 def tick(store: Store | None = None, now: int | None = None, snapshot: dict | None = None) -> dict:
@@ -694,10 +688,17 @@ def command_stop(reason: str = "user_stop") -> int:
     moment = now_ms()
     Store().update(lambda state: apply_stop(state, moment, reason), moment)
     release_hold()
-    if reason == "repair":
-        kill_dsmn_inhibitors()
     payload = status_payload(tick(), moment)
     return payload
+
+
+def command_repair() -> dict:
+    """Keep the running timer and start the holder again when it should be awake."""
+    moment = now_ms()
+    bundle = tick()
+    if bundle["decision"]["prevent"]:
+        ensure_hold(bundle["state"], bundle["decision"])
+    return status_payload(bundle, moment)
 
 
 def watch_main() -> int:
@@ -795,7 +796,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload) if "--json" in rest else doctor_text(payload), end="" if "--json" not in rest else "\n")
         return 0
     if command == "repair":
-        payload = command_stop("repair")
+        payload = command_repair()
         print(json.dumps(payload) if "--json" in rest else doctor_text(payload), end="" if "--json" not in rest else "\n")
         return 0
     if command == "doctor":

@@ -287,5 +287,47 @@ class HoldIdentityTests(unittest.TestCase):
                 dsmn_core.read_cmdline = original_argv
 
 
+class RepairTests(unittest.TestCase):
+    def tearDown(self):
+        os.environ.pop("DSMN_STATE_DIR", None)
+
+    def test_repair_keeps_the_timer_and_does_not_signal_a_stranger(self):
+        with tempfile.TemporaryDirectory() as directory:
+            os.environ["DSMN_STATE_DIR"] = directory
+            moment = dsmn_core.now_ms()
+            state = dsmn_core.apply_manual(dsmn_core.empty_state(moment), 30, moment)
+            dsmn_core.Store().update(lambda _current: state, moment)
+            original = (
+                dsmn_core.probe_snapshot,
+                dsmn_core.subprocess.Popen,
+                dsmn_core.os.kill,
+                dsmn_core.list_inhibitors,
+            )
+            started = []
+            killed = []
+            dsmn_core.probe_snapshot = lambda: {"power": "ac", "batteryPercent": None, "route": True}
+            dsmn_core.subprocess.Popen = lambda *args, **kwargs: started.append(args)
+            dsmn_core.os.kill = lambda pid, sig: killed.append((pid, sig))
+            dsmn_core.list_inhibitors = lambda: [
+                {"what": "sleep", "who": "dsmn", "why": "not ours", "mode": "block", "uid": 1000, "pid": 99999}
+            ]
+            try:
+                payload = dsmn_core.command_repair()
+                saved = dsmn_core.Store().load(moment)
+                self.assertEqual(saved["manualUntil"], state["manualUntil"])
+                self.assertTrue(payload["prevent"])
+                self.assertTrue(started)
+                self.assertEqual(killed, [])
+                dsmn_core.kill_dsmn_inhibitors()
+                self.assertEqual(killed, [])
+            finally:
+                (
+                    dsmn_core.probe_snapshot,
+                    dsmn_core.subprocess.Popen,
+                    dsmn_core.os.kill,
+                    dsmn_core.list_inhibitors,
+                ) = original
+
+
 if __name__ == "__main__":
     unittest.main()
