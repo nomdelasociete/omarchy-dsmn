@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "Nom de la Société",
   "license": "MIT",
-  "description": "Don't stop me now. Keeps this Omarchy machine awake while a lease is running, and lets it sleep when the work stops.",
+  "description": "Keeps your Omarchy computer awake while a local coding agent is working, then lets it sleep when that work stops. Claude Code, Cursor, Codex, Grok, and Pi can keep a timer going from the bar. You can also start 30 minutes, 90 minutes, or a length you choose, up to 8 hours. Stop, or the end of the timer, allows sleep again. The screen can still blank and the session can still lock. Installing it does not add hooks or change sleep settings. Those stay in Settings, and only if you ask.",
   "kinds": ["service", "bar-widget"],
   "keepLoaded": true,
   "entryPoints": {
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "dsmn",
-    "description": "A countdown for the lease that keeps the machine awake.",
+    "description": "Keeps the computer awake while an agent works, and shows the time left.",
     "category": "System",
     "aliases": ["dsmn", "awake", "sleep", "caffeine"],
     "allowMultiple": false,

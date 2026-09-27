@@ -4,7 +4,7 @@
 
 Don't stop me now.
 
-dsmn keeps an Omarchy machine awake while a lease is running, then lets it sleep when the work stops. The pulse sits in the bar with the time left beside it. Open it for the timer. Settings is where the hooks and the bar position live.
+dsmn keeps the computer awake while a local coding agent is working, then lets it sleep when that work stops. The mark in the bar shows the time left. Open it to start or stop a timer. Settings is where Claude Code, Cursor, Codex, Grok, and Pi can renew that timer, and where you move the icon.
 
 Free. No account. MIT.
 
