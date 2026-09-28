@@ -4,6 +4,10 @@
 set -euo pipefail
 
 dropin=/etc/systemd/logind.conf.d/nomdelasociete-dsmn-lid.conf
+if [[ -L "$dropin" ]]; then
+  echo "dsmn will not follow a symlink at $dropin." >&2
+  exit 1
+fi
 echo "dsmn will let a closed lid obey the sleep lease."
 echo "This writes $dropin and reloads logind. Sleep still works when the lease ends."
 sudo mkdir -p /etc/systemd/logind.conf.d

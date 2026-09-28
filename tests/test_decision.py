@@ -293,6 +293,22 @@ class HookTests(unittest.TestCase):
             removed = hooks.uninstall_one("pi")
             self.assertEqual(removed["message"], "absent")
             self.assertEqual(pi_file.read_text(), "export const note = 'dsmn-agent-hook.sh'\n")
+            refused = hooks.install_one("pi", force=True)
+            self.assertFalse(refused["ok"], refused)
+            self.assertEqual(pi_file.read_text(), "export const note = 'dsmn-agent-hook.sh'\n")
+
+            grok = home / ".grok" / "hooks"
+            grok.mkdir(parents=True)
+            grok_file = grok / "dsmn.json"
+            grok_file.write_text(json.dumps({
+                "keep": True,
+                "hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": impostor}]}]},
+            }))
+            hooks.install_one("grok", force=True)
+            hooks.uninstall_one("grok")
+            saved = json.loads(grok_file.read_text())
+            self.assertTrue(saved["keep"])
+            self.assertNotIn(hooks.hook_command("grok", "PreToolUse"), grok_file.read_text())
 
 
 class HoldIdentityTests(unittest.TestCase):

@@ -727,10 +727,15 @@ def command_repair() -> dict:
     return status_payload(bundle, moment)
 
 
+def _open_lock(path: Path):
+    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    return os.fdopen(fd, "a+")
+
+
 def watch_main() -> int:
     lock_path = state_dir() / "hold.lock"
-    lock_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-    lock = open(lock_path, "a+", encoding="utf-8")
+    lock = _open_lock(lock_path)
     try:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -753,8 +758,7 @@ def watch_main() -> int:
 
 def hold_main() -> int:
     lock_path = state_dir() / "hold.lock"
-    lock_path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-    lock = open(lock_path, "a+", encoding="utf-8")
+    lock = _open_lock(lock_path)
     try:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -764,8 +768,7 @@ def hold_main() -> int:
         return 1
     record = f"{os.getpid()} {started}"
     path = pid_path()
-    path.write_text(record + "\n", encoding="utf-8")
-    os.chmod(path, 0o600)
+    replace_file(path, record + "\n", 0o600)
     try:
         while True:
             bundle = tick()

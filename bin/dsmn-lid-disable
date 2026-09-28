@@ -3,6 +3,10 @@
 set -euo pipefail
 
 dropin=/etc/systemd/logind.conf.d/nomdelasociete-dsmn-lid.conf
+if [[ -L "$dropin" ]]; then
+  echo "dsmn will not follow a symlink at $dropin." >&2
+  exit 1
+fi
 if [[ ! -f "$dropin" ]]; then
   echo "dsmn had not changed the lid setting."
   exit 0

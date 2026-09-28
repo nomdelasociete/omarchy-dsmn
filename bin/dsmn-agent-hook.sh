@@ -4,7 +4,6 @@ set -u
 
 MINUTES="${DSMN_HOOK_MINUTES:-20}"
 MIN_INTERVAL_SECONDS="${DSMN_HOOK_MIN_INTERVAL_SECONDS:-120}"
-FALLBACK_SECONDS="${DSMN_HOOK_FALLBACK_SECONDS:-600}"
 STATE_DIR="${DSMN_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dsmn}"
 STAMP_PATH="${DSMN_HOOK_STAMP:-$STATE_DIR/last-extend.stamp}"
 LOG_PATH="${DSMN_HOOK_LOG:-$STATE_DIR/hook.log}"
@@ -13,6 +12,10 @@ HOOK_AGENT="${DSMN_HOOK_AGENT:-agent}"
 HOOK_EVENT="${DSMN_HOOK_EVENT:-}"
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
+chmod 700 "$STATE_DIR" 2>/dev/null || true
+if [[ -L "$STATE_DIR" || -L "$STAMP_PATH" || -L "$LOG_PATH" || -L "$LOCK_PATH" ]]; then
+  exit 0
+fi
 
 log_event() {
   printf '%s %s\n' "$(date -Iseconds)" "$*" >>"$LOG_PATH" 2>/dev/null || true
@@ -86,17 +89,7 @@ should_skip_extend() {
   (( now - last < MIN_INTERVAL_SECONDS ))
 }
 
-fallback_inhibit() {
-  date +%s >"$STAMP_PATH" 2>/dev/null || true
-  if ! command -v systemd-inhibit >/dev/null 2>&1; then
-    log_event "fallback unavailable: systemd-inhibit not found"
-    return 0
-  fi
-  systemd-inhibit --what=sleep:idle:handle-lid-switch --who=dsmn --why="dsmn hook fallback" --mode=block \
-    sleep "$FALLBACK_SECONDS" >/dev/null 2>&1 &
-  disown "$!" 2>/dev/null || true
-  log_event "fallback inhibit started seconds=$FALLBACK_SECONDS"
-}
+
 
 resolve_dsmn() {
   if [[ -n "${DSMN_BIN:-}" && -x "$DSMN_BIN" ]]; then
@@ -122,7 +115,7 @@ acquire_extend_lock() {
   mkdir -p "$(dirname "$LOCK_PATH")" 2>/dev/null || true
   while ! mkdir "$LOCK_PATH" 2>/dev/null; do
     if [[ -d "$LOCK_PATH" ]] && find "$LOCK_PATH" -prune -mmin +5 2>/dev/null | grep -q .; then
-      rm -rf "$LOCK_PATH" 2>/dev/null || true
+      rmdir "$LOCK_PATH" 2>/dev/null || true
       continue
     fi
     if (( attempts >= 20 )); then
@@ -147,7 +140,6 @@ fi
 dsmn="$(resolve_dsmn || true)"
 if [[ -z "$dsmn" ]]; then
   log_event "dsmn not found"
-  fallback_inhibit
   exit 0
 fi
 
@@ -157,7 +149,6 @@ args=(manual --minutes "$MINUTES" --extend-only --requester "$REQUESTER_NAME")
 
 if ! "$dsmn" "${args[@]}" >/dev/null 2>&1; then
   log_event "dsmn manual failed requester=$REQUESTER_NAME"
-  fallback_inhibit
   exit 0
 fi
 

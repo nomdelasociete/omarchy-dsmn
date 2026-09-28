@@ -362,6 +362,16 @@ def install_one(target: str, force: bool = False) -> dict:
             return _install_codex()
         if target == "pi":
             path = _paths("pi")[0]
+            if path.is_symlink():
+                raise RuntimeError(f"{path} is a symlink; existing configuration was not written")
+            if path.is_file():
+                current = path.read_text(encoding="utf-8")
+                if current not in ("", _pi_source()):
+                    return {
+                        "target": target,
+                        "ok": False,
+                        "message": "the Pi extension is not dsmn's file; it was not written",
+                    }
             _write_text(path, _pi_source())
             os.chmod(hook_script(), 0o755)
             return {"target": target, "ok": True, "message": "installed", "path": str(path)}
@@ -422,9 +432,8 @@ def uninstall_one(target: str) -> dict:
             changed = _cursor_strip(root)
         else:
             changed = _strip_standard(root, target)
-        if target == "grok" and not root.get("hooks"):
-            if not path.is_symlink():
-                path.unlink()
+        if target == "grok" and not root.get("hooks") and not root and not path.is_symlink():
+            path.unlink()
             return {"target": target, "ok": True, "message": "removed"}
         if changed:
             _write_json(path, root)
