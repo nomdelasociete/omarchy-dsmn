@@ -7,7 +7,7 @@ import os
 import shutil
 from pathlib import Path
 
-from dsmn_core import cli_linked
+from dsmn_core import cli_linked, replace_file
 
 EVENTS = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse"]
 CURSOR_EVENTS = ["sessionStart", "beforeSubmitPrompt", "preToolUse", "postToolUse"]
@@ -58,26 +58,12 @@ def _command_is_ours(command: str, agent: str, event: str) -> bool:
 
 def _write_private(path: Path, payload: str) -> None:
     """Replace path without widening its permissions. New files stay private."""
-    if path.is_symlink():
-        raise RuntimeError(f"{path} is a symlink; existing configuration was not written")
     path.parent.mkdir(parents=True, mode=0o755, exist_ok=True)
     try:
         mode = path.stat().st_mode & 0o777
     except FileNotFoundError:
         mode = 0o600
-    temporary = path.with_suffix(path.suffix + ".dsmn-tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-        os.chmod(temporary, mode)
-        os.replace(temporary, path)
-    except Exception:
-        try:
-            temporary.unlink()
-        except OSError:
-            pass
-        raise
+    replace_file(path, payload, mode)
 
 
 def _read_json(path: Path) -> dict:

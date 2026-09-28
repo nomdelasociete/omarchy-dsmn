@@ -233,6 +233,28 @@ class HookTests(unittest.TestCase):
             self.assertNotIn("dsmn-agent-hook.sh", after)
             self.assertEqual(settings.stat().st_mode & 0o777, 0o600)
 
+    def test_install_does_not_truncate_an_existing_temp_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            os.environ["DSMN_HOME"] = directory
+            os.environ["DSMN_STATE_DIR"] = directory
+            claude = Path(directory) / ".claude"
+            claude.mkdir()
+            settings = claude / "settings.json"
+            settings.write_text("{}\n")
+            decoy = claude / "settings.json.dsmn-tmp"
+            decoy.write_text("keep this\n")
+            os.chmod(decoy, 0o600)
+            report = hooks.install_one("claude", force=True)
+            self.assertTrue(report["ok"], report)
+            self.assertEqual(decoy.read_text(), "keep this\n")
+            self.assertIn("dsmn-agent-hook.sh", settings.read_text())
+            state_decoy = Path(directory) / "state.json.tmp"
+            state_decoy.write_text("keep state\n")
+            dsmn_core.Store().update(lambda state: state, dsmn_core.now_ms())
+            self.assertEqual(state_decoy.read_text(), "keep state\n")
+            self.assertTrue((Path(directory) / "state.json").is_file())
+            os.environ.pop("DSMN_STATE_DIR", None)
+
     def test_uninstall_keeps_a_command_that_only_mentions_our_words(self):
         impostor = "echo dsmn-agent-hook.sh DSMN_HOOK_AGENT='claude'"
         cursor_impostor = "echo dsmn-agent-hook.sh DSMN_HOOK_AGENT='cursor'"

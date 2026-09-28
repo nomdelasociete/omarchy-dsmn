@@ -13,6 +13,7 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -121,11 +122,36 @@ class Store:
             if updated is None:
                 updated = state
             payload = json.dumps(updated, indent=2, sort_keys=True) + "\n"
-            temporary = self.path.with_suffix(".json.tmp")
-            temporary.write_text(payload, encoding="utf-8")
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, self.path)
+            replace_file(self.path, payload, 0o600)
             return updated
+
+
+def replace_file(path: Path, payload: str, mode: int | None = None) -> None:
+    """Replace path by renaming a new file in the same directory.
+
+    The temporary name is exclusive. An existing file is never opened or truncated.
+    """
+    if path.is_symlink():
+        raise RuntimeError(f"{path} is a symlink; existing configuration was not written")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if mode is None:
+        try:
+            mode = path.stat().st_mode & 0o777
+        except FileNotFoundError:
+            mode = 0o600
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def lease_active(state: dict, now: int) -> bool:
