@@ -51,13 +51,9 @@ def _hook_group(agent: str, event: str) -> dict:
     }
 
 
-def _is_ours(command: str, agent: str | None = None) -> bool:
-    """True only for dsmn's own hook command, not a shared substring."""
-    if "dsmn-agent-hook.sh" not in command:
-        return False
-    if agent is None:
-        return True
-    return f"DSMN_HOOK_AGENT={shell_quote(agent)}" in command or f"DSMN_HOOK_AGENT='{agent}'" in command
+def _command_is_ours(command: str, agent: str, event: str) -> bool:
+    """The command dsmn writes for this agent and event. Nothing that merely contains it."""
+    return command == hook_command(agent, event)
 
 
 def _write_private(path: Path, payload: str) -> None:
@@ -129,7 +125,7 @@ def _merge_standard(root: dict, agent: str) -> bool:
                 removed = False
                 for item in nested:
                     command = str(item.get("command") or "") if isinstance(item, dict) else ""
-                    if _is_ours(command, agent):
+                    if _command_is_ours(command, agent, event):
                         removed = True
                         continue
                     filtered.append(item)
@@ -165,7 +161,7 @@ def _strip_standard(root: dict, agent: str) -> bool:
             filtered = []
             for item in group["hooks"]:
                 command = str(item.get("command") or "") if isinstance(item, dict) else ""
-                if _is_ours(command, agent):
+                if _command_is_ours(command, agent, event):
                     changed = True
                     continue
                 filtered.append(item)
@@ -204,13 +200,16 @@ def _cursor_merge(root: dict) -> bool:
             raise RuntimeError("unsupported hooks JSON structure; existing configuration was not written")
         command = hook_command("cursor", event)
         kept = []
+        seen = False
         for entry in entries:
             current = str(entry.get("command") or "") if isinstance(entry, dict) else ""
-            if _is_ours(current, "cursor") and current != command:
-                changed = True
-                continue
+            if current == command:
+                if seen:
+                    changed = True
+                    continue
+                seen = True
             kept.append(entry)
-        if not any(isinstance(entry, dict) and entry.get("command") == command for entry in kept):
+        if not seen:
             kept.append({"command": command, "timeout": 5})
             changed = True
         hooks[event] = kept
@@ -230,7 +229,7 @@ def _cursor_strip(root: dict) -> bool:
         kept = []
         for entry in entries:
             command = str(entry.get("command") or "") if isinstance(entry, dict) else ""
-            if _is_ours(command, "cursor"):
+            if command == hook_command("cursor", event):
                 changed = True
                 continue
             kept.append(entry)
@@ -422,7 +421,7 @@ def uninstall_one(target: str) -> dict:
     try:
         if target == "pi":
             path = _paths("pi")[0]
-            if path.is_file() and not path.is_symlink() and "dsmn-agent-hook.sh" in path.read_text(encoding="utf-8"):
+            if path.is_file() and not path.is_symlink() and path.read_text(encoding="utf-8") == _pi_source():
                 path.unlink()
                 return {"target": target, "ok": True, "message": "removed"}
             return {"target": target, "ok": True, "message": "absent"}
@@ -555,8 +554,6 @@ def _current(target: str) -> str:
             )
             if enabled and commands_ok:
                 return "current"
-            if json_path.is_file() and "dsmn-agent-hook.sh" in json_path.read_text(encoding="utf-8"):
-                return "outdated"
             return "missing"
         path = _paths(target)[0]
         if not path.is_file():
@@ -582,8 +579,6 @@ def _current(target: str) -> str:
             )
         if ok:
             return "current"
-        if "dsmn-agent-hook.sh" in path.read_text(encoding="utf-8"):
-            return "outdated"
         return "missing"
     except (OSError, RuntimeError):
         return "unreadable"

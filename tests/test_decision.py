@@ -233,6 +233,45 @@ class HookTests(unittest.TestCase):
             self.assertNotIn("dsmn-agent-hook.sh", after)
             self.assertEqual(settings.stat().st_mode & 0o777, 0o600)
 
+    def test_uninstall_keeps_a_command_that_only_mentions_our_words(self):
+        impostor = "echo dsmn-agent-hook.sh DSMN_HOOK_AGENT='claude'"
+        cursor_impostor = "echo dsmn-agent-hook.sh DSMN_HOOK_AGENT='cursor'"
+        with tempfile.TemporaryDirectory() as directory:
+            os.environ["DSMN_HOME"] = directory
+            home = Path(directory)
+            claude = home / ".claude"
+            claude.mkdir()
+            settings = claude / "settings.json"
+            settings.write_text(json.dumps({
+                "hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": impostor}]}]}
+            }))
+            hooks.install_one("claude", force=True)
+            hooks.uninstall_one("claude")
+            after = settings.read_text()
+            self.assertIn(impostor, after)
+            self.assertNotIn(hooks.hook_command("claude", "PreToolUse"), after)
+
+            cursor = home / ".cursor"
+            cursor.mkdir()
+            cursor_file = cursor / "hooks.json"
+            cursor_file.write_text(json.dumps({
+                "version": 1,
+                "hooks": {"preToolUse": [{"command": cursor_impostor}]},
+            }))
+            hooks.install_one("cursor", force=True)
+            hooks.uninstall_one("cursor")
+            cursor_after = cursor_file.read_text()
+            self.assertIn(cursor_impostor, cursor_after)
+            self.assertNotIn(hooks.hook_command("cursor", "preToolUse"), cursor_after)
+
+            pi = home / ".pi" / "agent" / "extensions"
+            pi.mkdir(parents=True)
+            pi_file = pi / "dsmn.ts"
+            pi_file.write_text("export const note = 'dsmn-agent-hook.sh'\n")
+            removed = hooks.uninstall_one("pi")
+            self.assertEqual(removed["message"], "absent")
+            self.assertEqual(pi_file.read_text(), "export const note = 'dsmn-agent-hook.sh'\n")
+
 
 class HoldIdentityTests(unittest.TestCase):
     def tearDown(self):
